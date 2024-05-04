@@ -1,6 +1,6 @@
 from langchain_community.chat_models import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.output_parsers import StrOutputParser
 
 model = ChatOllama(model="llama3:instruct")
@@ -20,13 +20,12 @@ ANSWER:
 
 prompt = ChatPromptTemplate.from_template(template=prompt_template)
 
-price_query_chain = {"product_name": RunnablePassthrough()} | prompt | model
-# res = chain.invoke(" what is the price of xiaomi?")
-# print(res.content)
+price_query_chain = {"product_name": RunnablePassthrough()} | prompt | model | {"output": StrOutputParser()}
 
-
-prompt_extract_product = """You are a Product name or Brand name extractor based on user input. 
+prompt_extract_product = """You are a Phone Product name or Brand name extractor based on user input. 
 ALways just responde with the product name or brand name. No need to include any other information. No more than two words.
+If you can't find the product name or brand name in the context, just simply respond "None".
+If user input is note related to phone topic, just respond "None".
 user_input: {input}
 ANSWER:
 """
@@ -35,12 +34,28 @@ product_extract_chain = (
     {"input": RunnablePassthrough()} 
     | ChatPromptTemplate.from_template(template=prompt_extract_product) 
     | model
-    | {"product_name": StrOutputParser()}
+    | {"output": StrOutputParser()}
     )
-# product_name = product_extract_chain.invoke("I want to buy a xaiomi mobile phone.").content
 
-final_chain = product_extract_chain | price_query_chain
+normal_prompt_template = """you are a chatbot assistant. responsd to user base on the userinput.
+user_input: {input}
+ANSWER:
+"""
+normal_prompt = ChatPromptTemplate.from_template(template=normal_prompt_template)
 
-res = final_chain.invoke("I want to buy iphone.")
+normal_chain = {"input": RunnablePassthrough()} | normal_prompt | model | {"output": StrOutputParser()}
 
-print(res.content)
+def route(info):
+    if "none" in info["output"]["output"].lower():
+        return normal_chain
+    else:
+        return price_query_chain
+    
+full_chain = (
+    {"input": RunnablePassthrough()}
+    | {"input": RunnablePassthrough(), "output": product_extract_chain}
+    | RunnableLambda(route)
+    )
+
+res = full_chain.invoke("who is the richest man in the world?")
+print(res["output"])
